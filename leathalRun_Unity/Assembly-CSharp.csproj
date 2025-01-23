@@ -62,11 +62,11 @@
     <Compile Include="Assets\Mobile\Scripts\Utilities\MobileDisableAutoSwitchControls.cs" />
     <Compile Include="Assets\Mobile\Scripts\VirtualInputs\UIVirtualJoystick.cs" />
     <Compile Include="Assets\Mobile\Scripts\VirtualInputs\UIVirtualTouchZone.cs" />
-    <Compile Include="Assets\Scripts\BasicRigidBodyPush.cs" />
-    <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
-    <Compile Include="Assets\Scripts\ThirdPersonController.cs" />
     <Compile Include="Assets\Scripts\CameraColllisionHandler.cs" />
-    <Compile Include="Assets\xd.cs" />
+    <Compile Include="Assets\Scripts\Escena Game\Personaje Y camara\BasicRigidBodyPush.cs" />
+    <Compile Include="Assets\TutorialInfo\Scripts\Readme.cs" />
+    <Compile Include="Assets\Scripts\Escena Game\Personaje Y camara\ThirdPersonController.cs" />
+    <Compile Include="Assets\Scripts\Escena Game\Personaje Y camara\CamaraChange.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Include="Assets\license.txt" />
