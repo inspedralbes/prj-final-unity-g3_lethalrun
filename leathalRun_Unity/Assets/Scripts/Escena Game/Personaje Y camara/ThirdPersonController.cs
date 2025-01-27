@@ -1,5 +1,6 @@
 ﻿using UnityEngine;
 using Cinemachine;
+using System.Collections;
 #if ENABLE_INPUT_SYSTEM && STARTER_ASSETS_PACKAGES_CHECKED
 using UnityEngine.InputSystem;
 #endif
@@ -83,6 +84,7 @@ namespace StarterAssets
         private int _animIDJump;
         private int _animIDFreeFall;
         private int _animIDMotionSpeed;
+        private Vector3 _initialCameraPosition;
 
 #if ENABLE_INPUT_SYSTEM && STARTER_ASSETS_PACKAGES_CHECKED
         private PlayerInput _playerInput;
@@ -104,6 +106,10 @@ namespace StarterAssets
         // Variable para el hueso de la médula espinal
         public Transform spineTransform;
 
+        private bool _isAttacking = false;
+        private int _animIDIsAttacking;
+
+
         private bool IsCurrentDeviceMouse => _playerInput.currentControlScheme == "KeyboardMouse";
 
         private void Awake()
@@ -117,13 +123,20 @@ namespace StarterAssets
         private void Start()
         {
             _cinemachineTargetYaw = CinemachineCameraTarget.transform.rotation.eulerAngles.y;
+            _initialCameraPosition = CinemachineCameraTarget.transform.localPosition;
 
             _hasAnimator = TryGetComponent(out _animator);
             _controller = GetComponent<CharacterController>();
             _input = GetComponent<StarterAssetsInputs>();
+#if ENABLE_INPUT_SYSTEM && STARTER_ASSETS_PACKAGES_CHECKED
             _playerInput = GetComponent<PlayerInput>();
+#else
+            Debug.LogError( "Starter Assets package is missing dependencies. Please use Tools/Starter Assets/Reinstall Dependencies to fix it");
+#endif
 
             AssignAnimationIDs();
+
+
 
             _jumpTimeoutDelta = JumpTimeout;
             _fallTimeoutDelta = FallTimeout;
@@ -136,6 +149,7 @@ namespace StarterAssets
             JumpAndGravity();
             GroundedCheck();
             Move();
+            HandleAttack();
 
             if (Keyboard.current.pKey.wasPressedThisFrame)
             {
@@ -155,6 +169,8 @@ namespace StarterAssets
             _animIDJump = Animator.StringToHash("Jump");
             _animIDFreeFall = Animator.StringToHash("FreeFall");
             _animIDMotionSpeed = Animator.StringToHash("MotionSpeed");
+            _animIDIsAttacking = Animator.StringToHash("IsAttacking");
+
         }
 
         private void GroundedCheck()
@@ -167,7 +183,6 @@ namespace StarterAssets
                 _animator.SetBool(_animIDGrounded, Grounded);
             }
         }
-
         private void CameraRotation()
         {
             if (_input.look.sqrMagnitude >= _threshold && !LockCameraPosition)
@@ -175,26 +190,74 @@ namespace StarterAssets
                 float deltaTimeMultiplier = IsCurrentDeviceMouse ? 1.0f : Time.deltaTime;
 
                 _cinemachineTargetYaw += _input.look.x * deltaTimeMultiplier;
-                _cinemachineTargetPitch += _input.look.y * deltaTimeMultiplier;
+
+                // Restricciones SOLO para primera persona
+                if (isFirstPerson)
+                {
+                    if (_input.move == Vector2.zero)
+                    {
+                        // Rango más estrecho y simétrico solo en primera persona cuando está quieto
+                        _cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch + _input.look.y * deltaTimeMultiplier, -20f, 35f);
+                    }
+                    else
+                    {
+                        // Rango normal en primera persona cuando se mueve
+                        _cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch + _input.look.y * deltaTimeMultiplier, -20f, 35f);
+                    }
+                }
+                else
+                {
+                    // En tercera persona, mantener el rango original completo
+                    _cinemachineTargetPitch = Mathf.Clamp(_cinemachineTargetPitch + _input.look.y * deltaTimeMultiplier, BottomClamp, TopClamp);
+                }
             }
 
             _cinemachineTargetYaw = ClampAngle(_cinemachineTargetYaw, float.MinValue, float.MaxValue);
             _cinemachineTargetPitch = ClampAngle(_cinemachineTargetPitch, BottomClamp, TopClamp);
 
-            CinemachineCameraTarget.transform.rotation = Quaternion.Euler(_cinemachineTargetPitch + CameraAngleOverride, _cinemachineTargetYaw, 0.0f);
+            // Añadir un pequeño offset solo para primera persona
+            float cameraOffset = isFirstPerson ? 0.1f : 0f;
+            CinemachineCameraTarget.transform.rotation = Quaternion.Euler(
+                _cinemachineTargetPitch + CameraAngleOverride + cameraOffset,
+                _cinemachineTargetYaw,
+                0.0f
+            );
 
             if (isFirstPerson)
             {
                 transform.rotation = Quaternion.Euler(0, _cinemachineTargetYaw, 0);
             }
 
-            // Rotación del hueso de la médula espinal
             if (spineTransform != null)
             {
                 float spineRotationX = Mathf.Clamp(_cinemachineTargetPitch, -45f, 45f);
                 spineTransform.localRotation = Quaternion.Euler(spineRotationX, 0f, 0f);
             }
         }
+
+
+        private void HandleAttack()
+        {
+            if (Mouse.current.leftButton.wasPressedThisFrame && !_isAttacking)
+            {
+                _isAttacking = true;
+                _animator.SetBool(_animIDIsAttacking, true);
+
+                // Aquí puedes añadir lógica adicional del ataque, como detección de colisiones
+
+                StartCoroutine(ResetAttackState());
+            }
+        }
+
+        private IEnumerator ResetAttackState()
+        {
+            // Espera a que la animación de ataque termine
+            yield return new WaitForSeconds(_animator.GetCurrentAnimatorStateInfo(0).length);
+
+            _isAttacking = false;
+            _animator.SetBool(_animIDIsAttacking, false);
+        }
+
 
         private void Move()
         {
@@ -237,13 +300,44 @@ namespace StarterAssets
 
             _controller.Move(targetDirection.normalized * (_speed * Time.deltaTime) + new Vector3(0.0f, _verticalVelocity, 0.0f) * Time.deltaTime);
 
+            // Ajustar la posición de la cámara SOLO en primera persona
+            if (isFirstPerson)
+            {
+                if ((_input.sprint && _speed > MoveSpeed) || (_input.move != Vector2.zero && _speed > 0))
+                {
+                    // Ajustar la posición de la cámara hacia adelante y arriba cuando se mueve
+                    CinemachineCameraTarget.transform.localPosition = Vector3.Lerp(
+                        CinemachineCameraTarget.transform.localPosition,
+                        _initialCameraPosition + new Vector3(0.1f, 0.024f, 0.444f), // Mover un poco más hacia adelante
+                        Time.deltaTime * 5f
+                    );
+                }
+                else
+                {
+                    // Volver a la posición inicial de la cámara
+                    CinemachineCameraTarget.transform.localPosition = Vector3.Lerp(
+                        CinemachineCameraTarget.transform.localPosition,
+                        _initialCameraPosition,
+                        Time.deltaTime * 5f
+                    );
+                }
+            }
+            else
+            {
+                // En tercera persona, mantener siempre la posición inicial de la cámara
+                CinemachineCameraTarget.transform.localPosition = Vector3.Lerp(
+                    CinemachineCameraTarget.transform.localPosition,
+                    _initialCameraPosition,
+                    Time.deltaTime * 5f
+                );
+            }
+
             if (_hasAnimator)
             {
                 _animator.SetFloat(_animIDSpeed, _animationBlend);
                 _animator.SetFloat(_animIDMotionSpeed, inputMagnitude);
             }
         }
-
         private void JumpAndGravity()
         {
             if (Grounded)
@@ -269,6 +363,16 @@ namespace StarterAssets
                     {
                         _animator.SetBool(_animIDJump, true);
                     }
+
+                    // Ajustar la posición de la cámara SOLO en primera persona durante el salto
+                    if (isFirstPerson)
+                    {
+                        CinemachineCameraTarget.transform.localPosition = Vector3.Lerp(
+                            CinemachineCameraTarget.transform.localPosition,
+                            _initialCameraPosition + new Vector3(0.1f, 0.5f, 0.444f), // Subir un poco más la cámara
+                            Time.deltaTime * 10f
+                        );
+                    }
                 }
 
                 if (_jumpTimeoutDelta >= 0.0f)
@@ -293,6 +397,16 @@ namespace StarterAssets
                 }
 
                 _input.jump = false;
+
+                // Ajustar la posición de la cámara SOLO en primera persona durante la caída
+                if (isFirstPerson)
+                {
+                    CinemachineCameraTarget.transform.localPosition = Vector3.Lerp(
+                        CinemachineCameraTarget.transform.localPosition,
+                        _initialCameraPosition + new Vector3(0.1f, 0.3f, 0.444f), // Ajustar altura durante la caída
+                        Time.deltaTime * 5f
+                    );
+                }
             }
 
             if (_verticalVelocity < _terminalVelocity)
@@ -300,6 +414,7 @@ namespace StarterAssets
                 _verticalVelocity += Gravity * Time.deltaTime;
             }
         }
+
 
         private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
         {
@@ -337,7 +452,9 @@ namespace StarterAssets
             {
                 AudioSource.PlayClipAtPoint(LandingAudioClip, transform.TransformPoint(_controller.center), FootstepAudioVolume);
             }
+
         }
+
 
         private void SwitchCamera()
         {
